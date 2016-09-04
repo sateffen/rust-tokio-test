@@ -1,0 +1,9 @@
+[package]
+name = "rust-tokio-test"
+version = "0.1.0"
+authors = ["Steffen W. <sateffen@gmail.com>"]
+
+[dependencies]
+tokio-core = { git = "https://github.com/tokio-rs/tokio-core" }
+tokio-proto = { git = "https://github.com/tokio-rs/tokio-proto" }
+futures = { git = "https://github.com/alexcrichton/futures-rs" }
