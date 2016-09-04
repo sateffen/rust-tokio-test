@@ -1,104 +1,49 @@
-#[macro_use]
+// load all extern crates
 extern crate tokio_core;
 extern crate tokio_proto;
 extern crate futures;
 
-use std::io::{Read, Write};
-use futures::{Future, Poll, Async};
+// load all local modules
+mod connection;
+
+// and setup all uses
+// first we want to use our self-defined connection 
+use connection::Connection;
+// then we need to load the Future, otherwise we can't use the Future from tcp_listen
+use futures::{Future};
+// then we need to load the Stream, otherwise we can't use the Stream from incoming 
 use futures::stream::Stream;
-use tokio_core::{Loop, TcpStream};
 
-struct Connection {
-    stream: TcpStream
-}
-
-impl Connection {
-    fn new(stream: TcpStream) -> Connection {
-        println!("Got Connection");
-
-        Connection {
-            stream: stream
-        }
-    }
-
-    fn do_read(&mut self) -> Result<Vec<u8>, ()> {
-        let mut complete_buffer: Vec<u8> = Vec::new();
-        let mut tmp_buffer = vec![0; 1024];
-
-        loop {
-            match self.stream.read(&mut tmp_buffer) {
-                Ok(len) => {
-                    for i in 0..len {
-                        complete_buffer.push(tmp_buffer[i]);
-                    }
-
-                    if len < 1024 {
-                        break;
-                    }
-                },
-                Err(_) => {
-                    return Ok(complete_buffer);
-                },
-            };
-        }
-
-        if complete_buffer.len() == 0 {
-            return Err(());
-        }
-        else {
-            return Ok(complete_buffer);
-        }
-    }
-}
-
-impl Future for Connection {
-    type Item = ();
-    type Error = ();
-
-    fn poll(&mut self) -> Poll<(), ()> {
-        loop {
-            match self.stream.poll_read() {
-                Ok(ready_state) => {
-                    match ready_state {
-                        Async::Ready(_) => {
-                            match self.do_read() {
-                                Ok(buf) => {
-                                    if buf.len() > 0 {
-                                        self.stream.write_all(&buf).unwrap();
-                                    }
-                                },
-                                Err(_) => return Ok(Async::Ready(())),
-                            }
-                        },
-                        Async::NotReady => break,
-                    };
-                }
-                Err(_) => break,
-            };
-        }
-
-        return Ok(Async::NotReady);
-    }
-}
-
+// here we start
 pub fn main() {
-    // first setup the eventloop
-    let mut event_loop = Loop::new().unwrap();
+    // first setup the eventloop. No eventloop, no fun
+    let mut event_loop = tokio_core::Loop::new().unwrap();
 
-    // setup a tcp listener, that listens for any new connections
+    // then we setup the tcp listener, by first parsing it's address
     let address = "0.0.0.0:8888".parse().unwrap();
+    // and taking a handle to the loop and create the listener itself (or at least a future
+    // that resolves to the listener)
     let tcp_listener = event_loop.handle().tcp_listen(&address);
+    // then we create a pinned handle. This pinned handle will spawn our connections in the
+    // eventloop, so they get executed
     let pin = event_loop.pin();
 
+    // then we wait til our listener is ready
     let server = tcp_listener.and_then(|listener| {
+        // now we have the listener
         listener
+            // so we take a stream of incoming sockets
             .incoming()
+            // and spawn each socket as connection to the eventloop, via pin.spawn(Future)
             .for_each(|(socket, _)| {
+                // so here we do the actual spawn. This will trigger a call to the Connection::poll function
                 pin.spawn(Connection::new(socket));
 
+                // we need to return an empty Result, just see the docs for details
                 Ok(())
-            })
+            }) // and, we return the result of for_each from the and_then :)
     });
 
+    // and tell the eventloop to actually execute the listener retrieval
     event_loop.run(server).unwrap();
 }
