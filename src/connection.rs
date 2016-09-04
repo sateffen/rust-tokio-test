@@ -63,6 +63,12 @@ impl Connection {
             return Ok(complete_buffer);
         }
     }
+
+    // in this function we handle the actual processing of the received buffer
+    fn handle_message(&mut self, buffer: Vec<u8>) {
+        // currently we just echo it back, nothing special
+        self.stream.write_all(&buffer).unwrap();
+    }
 }
 
 // and we implement everything necessary for the Future trait, so we can actually execute this
@@ -84,8 +90,10 @@ impl Future for Connection {
                     // we execute do_read and handle it result
                     match self.do_read() {
                         Ok(buf) => {
+                            // here we only handle the buffer if it's longer than 0, because we might
+                            // get empty reads, that are ok
                             if buf.len() > 0 {
-                                self.stream.write_all(&buf).unwrap();
+                                self.handle_message(buf);
                             }
                         },
                         // if do_read gave an error back, the socket got closed, so finish this future

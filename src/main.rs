@@ -1,6 +1,5 @@
 // load all extern crates
 extern crate tokio_core;
-extern crate tokio_proto;
 extern crate futures;
 
 // load all local modules
@@ -13,11 +12,13 @@ use connection::Connection;
 use futures::{Future};
 // then we need to load the Stream, otherwise we can't use the Stream from incoming 
 use futures::stream::Stream;
+// and use the Loop from tokio_core
+use tokio_core::Loop;
 
 // here we start
 pub fn main() {
     // first setup the eventloop. No eventloop, no fun
-    let mut event_loop = tokio_core::Loop::new().unwrap();
+    let mut event_loop = Loop::new().unwrap();
 
     // then we setup the tcp listener, by first parsing it's address
     let address = "0.0.0.0:8888".parse().unwrap();
