@@ -8,43 +8,39 @@ mod connection;
 // and setup all uses
 // first we want to use our self-defined connection 
 use connection::Connection;
-// then we need to load the Future, otherwise we can't use the Future from tcp_listen
-use futures::{Future};
-// then we need to load the Stream, otherwise we can't use the Stream from incoming 
+// then we need the stream from futures, because we want to use the incoming
 use futures::stream::Stream;
-// and use the Loop from tokio_core
-use tokio_core::Loop;
+// and we need the tcp listener from tokio core
+use tokio_core::net::TcpListener;
+// and the actual tokio reactor
+use tokio_core::reactor::Core;
 
 // here we start
 pub fn main() {
-    // first setup the eventloop. No eventloop, no fun
-    let mut event_loop = Loop::new().unwrap();
+    // first setup the reactor. No reactor, no fun
+    let mut reactor = Core::new().unwrap();
+    // and we need an actual handle to the reactor, so we can spawn our connections
+    let handle = reactor.handle();
 
     // then we setup the tcp listener, by first parsing it's address
     let address = "0.0.0.0:8888".parse().unwrap();
-    // and taking a handle to the loop and create the listener itself (or at least a future
-    // that resolves to the listener)
-    let tcp_listener = event_loop.handle().tcp_listen(&address);
-    // then we create a pinned handle. This pinned handle will spawn our connections in the
-    // eventloop, so they get executed
-    let pin = event_loop.pin();
+    // and creating the tcp listener itself. This socket will actually listen for new connections
+    let listener = TcpListener::bind(&address, &handle).unwrap();
 
-    // then we wait til our listener is ready
-    let server = tcp_listener.and_then(|listener| {
-        // now we have the listener
-        listener
-            // so we take a stream of incoming sockets
-            .incoming()
-            // and spawn each socket as connection to the eventloop, via pin.spawn(Future)
-            .for_each(|(socket, _)| {
-                // so here we do the actual spawn. This will trigger a call to the Connection::poll function
-                pin.spawn(Connection::new(socket));
+    // and here we take the new connections We setup a server-future
+    let server = listener
+        // which is based on listening for each incoming connection
+        .incoming()
+        // and going for each connection
+        .for_each(|(socket, _)| {
+            // then spawning our connection itself to the reactor. The connection is a future, so
+            // the reactor will actually try to resolve it
+            handle.spawn(Connection::new(socket));
 
-                // we need to return an empty Result, just see the docs for details
-                Ok(())
-            }) // and, we return the result of for_each from the and_then :)
-    });
+            // and finally we return just an Ok, because we have to.
+            Ok(())
+        });
 
-    // and tell the eventloop to actually execute the listener retrieval
-    event_loop.run(server).unwrap();
+    // finally we tell the reactor to run our server
+    reactor.run(server).unwrap();
 }

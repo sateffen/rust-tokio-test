@@ -5,7 +5,7 @@ use std::io::{Read, Write};
 // then we need to load everything from the futures
 use futures::{Future, Poll, Async};
 // and we need the TcpStream, because otherwise we can't use the type
-use tokio_core::{TcpStream};
+use tokio_core::net::{TcpStream};
 
 // then we define our struct, that represents a connection. This will be used in the main.rs
 pub struct Connection {
@@ -32,8 +32,10 @@ impl Connection {
 
         // then we loop as long as there is something to read
         loop {
-            // we actually read something
+            // we actually read something, or attempt to read at least. This gets called while
+            // the poll is active, so this implicitly tells tokio to schedule a future read
             match self.stream.read(&mut tmp_buffer) {
+                // and if we read something, we collect it to the complete buffer
                 Ok(len) => {
                     // first we copy the tmp_buffer to the complete_buffer
                     for i in 0..len {
@@ -45,10 +47,10 @@ impl Connection {
                         break;
                     }
                 },
-                // if anything went wrong, we ignore it and simply return the complete_buffer
-                Err(_) => {
-                    return Ok(complete_buffer);
-                },
+                // else an error occured, it's a "WouldBlock" error. That tells us, that there is
+                // nothing to read. If there is nothing to read, we return with an Ok, and the complete_buffer
+                // the buffer might be 0 length, but that's alright, the next read will come
+                Err(_) => return Ok(complete_buffer),
             };
         }
         // now our complete_buffer is filled up with everything read
@@ -73,41 +75,34 @@ impl Connection {
 
 // and we implement everything necessary for the Future trait, so we can actually execute this
 impl Future for Connection {
-    // now we define the types for this Future. We need to set an empty type, so we can pin.spawn it
+    // now we define the types for this Future. We need to set an empty type, so we can handle.spawn it
     type Item = ();
     type Error = ();
 
     // and we define the poll method for this
     fn poll(&mut self) -> Poll<(), ()> {
-        // then we loop as long as there are some messages to read. This will at least run
-        // two times, so the poll_read will setup the next read. We need to execute the poll_read
-        // to regiser our interest in the read
+        // we simply loop as long as we can read
         loop {
-            // and now we match the result of poll_read, so we know can handle the current situation
-            match self.stream.poll_read() {
-                // if we can actually read something
-                Ok(Async::Ready(_)) => {
-                    // we execute do_read and handle it result
-                    match self.do_read() {
-                        Ok(buf) => {
-                            // here we only handle the buffer if it's longer than 0, because we might
-                            // get empty reads, that are ok
-                            if buf.len() > 0 {
-                                self.handle_message(buf);
-                            }
-                        },
-                        // if do_read gave an error back, the socket got closed, so finish this future
-                        Err(_) => return Ok(Async::Ready(())),
+            // and check if there is something to read. This will trigger the reactor to schedule something
+            // to read in future, just because we execute a read in there.
+            match self.do_read() {
+                // if we got a buffer we can work with it
+                Ok(buf) => {
+                    // but first we have to check it's length. If it's longer than 0 bytes, we can work with it
+                    if buf.len() > 0 {
+                        // by calling handle_message with the buffer
+                        self.handle_message(buf);
+                    }
+                    // else the buffer had a length of 0, so a WouldBlock occured, so there is nothing to read
+                    else {
+                        // so we simply tell the outer world to check back later on
+                        return Ok(Async::NotReady);
                     }
                 },
-                // if it's not ready break the loop
-                Ok(Async::NotReady) => break,
-                // or it an error occured, ignore it and break the loop
-                Err(_) => break,
+                // else we got an error, that tells us the connection got closed. If it got closed
+                // we can tell the future is ready and quit it.
+                Err(_) => return Ok(Async::Ready(())),
             };
         }
-
-        // and if we reach this, we have registered another interest in reading, so we wait
-        return Ok(Async::NotReady);
     }
 }
