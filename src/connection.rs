@@ -37,14 +37,23 @@ impl Connection {
             match self.stream.read(&mut tmp_buffer) {
                 // and if we read something, we collect it to the complete buffer
                 Ok(len) => {
-                    // first we copy the tmp_buffer to the complete_buffer
-                    for i in 0..len {
-                        complete_buffer.push(tmp_buffer[i]);
-                    }
-
-                    // and check if the buffer was full. If it wasn't full, we don't need to read anymore
+                    // if we read less than 1024 byte (which is the size of our tmp_buffer), there
+                    // wasn't more to read
                     if len < 1024 {
+                        // because we know, that after this the tmp_buffer isn't needed anymore, we
+                        // truncate the tmp_buffer to the read length. After this, it's just len long
+                        tmp_buffer.truncate(len);
+                        // now we extend the complete_buffer by what's left in our tmp_buffer
+                        complete_buffer.extend(&tmp_buffer);
+                        // and because we don't have anything left to read, we break this loop, so
+                        // the followup logic can work with the result
                         break;
+                    }
+                    // else we read 1024 byte, so we expect even more to read
+                    else {
+                        // so we simply extend our complete_buffer with our tmp_buffer. We don't need to
+                        // truncate tmp_buffer, because we need the complete tmp_buffer
+                        complete_buffer.extend(&tmp_buffer);
                     }
                 },
                 // else an error occured, it's a "WouldBlock" error. That tells us, that there is
